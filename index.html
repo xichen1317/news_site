@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>每日新闻</title>
+  <style>
+    :root {
+      --bg: #f7f7f5;
+      --card: #ffffff;
+      --text: #1a1a1a;
+      --muted: #6b6b6b;
+      --line: #e6e6e3;
+      --accent: #1a1a1a;
+      --accent-text: #ffffff;
+      --shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111111;
+        --card: #1a1a1a;
+        --text: #ededed;
+        --muted: #9a9a9a;
+        --line: #2a2a2a;
+        --accent: #ededed;
+        --accent-text: #111111;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 48px 16px 64px; }
+
+    header { margin-bottom: 28px; }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -.02em; }
+    .meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 28px; }
+    .tags { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+    .tag {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .tag:hover { border-color: var(--muted); }
+    .tag.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+    .tag .n { opacity: .55; margin-left: 4px; }
+    .search {
+      border: 1px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+      padding: 7px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      width: 220px;
+      max-width: 100%;
+      outline: none;
+    }
+    .search:focus { border-color: var(--muted); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+      text-decoration: none;
+      color: inherit;
+      box-shadow: var(--shadow);
+      transition: transform .15s, border-color .15s;
+    }
+    .card:hover { transform: translateY(-2px); border-color: var(--muted); }
+    .card-top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+    .source { font-weight: 600; color: var(--text); }
+    .title { font-size: 16px; font-weight: 600; line-height: 1.45; letter-spacing: -.01em; }
+    .summary {
+      font-size: 14px;
+      color: var(--muted);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .more { margin-top: auto; font-size: 12px; color: var(--muted); }
+    .card:hover .more { color: var(--text); }
+
+    .empty { color: var(--muted); text-align: center; padding: 64px 0; font-size: 14px; }
+    .empty input { margin-top: 12px; font-size: 13px; }
+
+    @media (max-width: 520px) {
+      .wrap { padding-top: 32px; }
+      h1 { font-size: 24px; }
+      .search { width: 100%; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>每日新闻</h1>
+      <div class="meta" id="meta">加载中…</div>
+    </header>
+
+    <div class="toolbar">
+      <div class="tags" id="tags"></div>
+      <input class="search" id="search" type="search" placeholder="搜索标题或摘要">
+    </div>
+
+    <main class="grid" id="grid"></main>
+    <div class="empty" id="empty" hidden></div>
+  </div>
+
+  <script>
+    const DATA_URL = "news.json";
+    const ALL = "全部";
+
+    const state = { articles: [], tag: ALL, query: "" };
+    const $ = (id) => document.getElementById(id);
+
+    function escapeHtml(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    }
+
+    function safeUrl(url) {
+      return /^https?:\/\//i.test(url || "") ? url : "#";
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return "";
+      const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (isNaN(diff)) return "";
+      if (diff < 60) return "刚刚";
+      if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+      if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`;
+      return new Date(iso).toLocaleDateString("zh-CN");
+    }
+
+    function load(data) {
+      state.articles = (data.sources || []).flatMap((s) =>
+        (s.articles || []).map((a) => ({ ...a, website: s.website }))
+      ).sort((a, b) => new Date(b.published_at || 0) - new Date(a.published_at || 0));
+
+      const updated = data.generated_at
+        ? new Date(data.generated_at).toLocaleString("zh-CN")
+        : "未知";
+      $("meta").textContent = `${state.articles.length} 篇 · 更新于 ${updated}`;
+      render();
+    }
+
+    function renderTags() {
+      const counts = {};
+      state.articles.forEach((a) => { counts[a.website] = (counts[a.website] || 0) + 1; });
+      const tags = [[ALL, state.articles.length], ...Object.entries(counts)];
+
+      $("tags").innerHTML = tags.map(([name, n]) => `
+        <button class="tag ${name === state.tag ? "active" : ""}" data-tag="${escapeHtml(name)}">
+          ${escapeHtml(name)}<span class="n">${n}</span>
+        </button>`).join("");
+    }
+
+    function render() {
+      renderTags();
+
+      const q = state.query.trim().toLowerCase();
+      const list = state.articles.filter((a) =>
+        (state.tag === ALL || a.website === state.tag) &&
+        (!q || `${a.title} ${a.summary}`.toLowerCase().includes(q))
+      );
+
+      $("grid").innerHTML = list.map((a) => `
+        <a class="card" href="${escapeHtml(safeUrl(a.link))}" target="_blank" rel="noopener noreferrer">
+          <div class="card-top">
+            <span class="source">${escapeHtml(a.website)}</span>
+            <span>${escapeHtml(timeAgo(a.published_at))}</span>
+          </div>
+          <div class="title">${escapeHtml(a.title)}</div>
+          ${a.summary && a.summary !== a.title ? `<div class="summary">${escapeHtml(a.summary)}</div>` : ""}
+          <div class="more">阅读原文 →</div>
+        </a>`).join("");
+
+      const empty = $("empty");
+      empty.hidden = list.length > 0;
+      if (!list.length) empty.textContent = "没有匹配的新闻";
+    }
+
+    // 直接双击打开 index.html（file://）时浏览器会拦截 fetch，这时让用户手动选择 news.json
+    function showFilePicker() {
+      $("meta").textContent = "无法自动读取 news.json";
+      const empty = $("empty");
+      empty.hidden = false;
+      empty.innerHTML = `请用本地服务器打开（如 <code>python -m http.server</code>），或手动选择 news.json：<br>
+        <input type="file" accept=".json,application/json" id="file">`;
+      $("file").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try { load(JSON.parse(await file.text())); }
+        catch { empty.textContent = "文件格式不正确"; }
+      });
+    }
+
+    $("tags").addEventListener("click", (e) => {
+      const btn = e.target.closest(".tag");
+      if (!btn) return;
+      state.tag = btn.dataset.tag;
+      render();
+    });
+
+    $("search").addEventListener("input", (e) => {
+      state.query = e.target.value;
+      render();
+    });
+
+    fetch(DATA_URL, { cache: "no-store" })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(load)
+      .catch(showFilePicker);
+  </script>
+</body>
+</html>
